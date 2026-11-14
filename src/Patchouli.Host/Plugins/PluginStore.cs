@@ -832,9 +832,13 @@ public sealed class PluginStore : IPluginStore, IDisposable
 
             return parsed;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (OperationCanceledException)
         {
-            return Failure<PluginCatalogIndex>("cancelled", "Refreshing the plugin catalog was cancelled.");
+            return Failure<PluginCatalogIndex>("unavailable", "Downloading the signed community index timed out.");
         }
         catch (Exception exception) when (IsExpected(exception) || exception is DecoderFallbackException)
         {
@@ -961,8 +965,13 @@ public sealed class PluginStore : IPluginStore, IDisposable
     private static async Task<byte[]> GetLimitedAsync(HttpClient client, string url, int maximum,
         CancellationToken cancellationToken)
     {
+        // ResponseHeadersRead ends HttpClient's timeout at the headers. Keep the same
+        // deadline alive while reading the bounded body as well.
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(client.Timeout);
+        CancellationToken requestToken = deadline.Token;
         using HttpResponseMessage response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
+            requestToken);
         if (!response.IsSuccessStatusCode)
         {
             throw new HttpRequestException($"HTTP {(int)response.StatusCode} from {url}");
@@ -973,12 +982,12 @@ public sealed class PluginStore : IPluginStore, IDisposable
             throw new InvalidDataException("The response exceeds the allowed size.");
         }
 
-        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using Stream stream = await response.Content.ReadAsStreamAsync(requestToken);
         using MemoryStream output = new();
         byte[] buffer = new byte[81920];
         while (true)
         {
-            int read = await stream.ReadAsync(buffer, cancellationToken);
+            int read = await stream.ReadAsync(buffer, requestToken);
             if (read == 0)
             {
                 break;

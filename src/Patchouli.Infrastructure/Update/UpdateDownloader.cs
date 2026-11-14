@@ -126,12 +126,17 @@ public sealed class UpdateDownloader
         string temporary = Path.Combine(Path.GetTempPath(),
             $"patchouli-update-{Guid.NewGuid():N}{InstallerExtensionFor(asset.Name)}");
         bool keepFile = false;
+        // Keep the configured download deadline through body transfer and verification;
+        // ResponseHeadersRead otherwise limits HttpClient.Timeout to the headers.
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(_httpClient.Timeout);
+        CancellationToken requestToken = deadline.Token;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             using HttpResponseMessage response = await _httpClient.GetAsync(asset.DownloadUrl,
-                HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                HttpCompletionOption.ResponseHeadersRead, requestToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 return Result<VerifiedDownload>.Failure(AppErrorCodes.NetworkError,
@@ -148,14 +153,14 @@ public sealed class UpdateDownloader
                              FileAccess.Write, FileShare.None))
             {
                 await using Stream source = await response.Content
-                    .ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                    .ReadAsStreamAsync(requestToken).ConfigureAwait(false);
                 byte[] buffer = new byte[BufferSize];
                 long downloaded = 0;
                 int read;
-                while ((read = await source.ReadAsync(buffer, cancellationToken)
+                while ((read = await source.ReadAsync(buffer, requestToken)
                            .ConfigureAwait(false)) > 0)
                 {
-                    await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
+                    await destination.WriteAsync(buffer.AsMemory(0, read), requestToken)
                         .ConfigureAwait(false);
                     downloaded += read;
                     if (asset.SizeBytes > 0 && downloaded > asset.SizeBytes)
@@ -167,7 +172,7 @@ public sealed class UpdateDownloader
                     progress?.Report(new UpdateDownloadProgress(downloaded, totalBytes));
                 }
 
-                await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+                await destination.FlushAsync(requestToken).ConfigureAwait(false);
 
                 if (downloaded == 0)
                 {
@@ -182,7 +187,7 @@ public sealed class UpdateDownloader
                 }
             }
 
-            Result<bool> integrity = await VerifyIntegrityAsync(asset, temporary, cancellationToken)
+            Result<bool> integrity = await VerifyIntegrityAsync(asset, temporary, requestToken)
                 .ConfigureAwait(false);
             if (integrity.IsFailure)
             {

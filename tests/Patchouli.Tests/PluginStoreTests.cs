@@ -21,6 +21,97 @@ public sealed class PluginStoreTests
     private const string ArtifactUrl = "https://example.test/plugin.zip";
 
     [Fact]
+    public async Task Catalog_body_timeout_is_unavailable_not_cancelled()
+    {
+        using SigningKey key = new();
+        using GatedAssetStream body = new("unfinished index"u8.ToArray());
+        using HttpClient catalogClient = new(new GatedAssetHttpHandler(IndexUrl, body))
+        {
+            Timeout = TimeSpan.FromSeconds(1)
+        };
+        using HttpClient downloadClient = new(new FakeHttpHandler());
+        using PluginStore store = CreateStore(NewRoot(), key, catalogClient, downloadClient, new FakeLauncher());
+        Task<Result<PluginStoreSnapshot>> pending = store.RefreshAsync(true);
+        try
+        {
+            await body.Blocked.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Result<PluginStoreSnapshot> result = await pending.WaitAsync(TimeSpan.FromSeconds(5));
+            result.ErrorCode.Should().Be("unavailable");
+            result.ErrorMessage.Should().Contain("timed out");
+        }
+        finally
+        {
+            body.Release.TrySetResult();
+            await pending;
+        }
+    }
+
+    [Fact]
+    public async Task Catalog_user_cancellation_remains_cancelled()
+    {
+        using SigningKey key = new();
+        using GatedAssetStream body = new("unfinished index"u8.ToArray());
+        using HttpClient catalogClient = new(new GatedAssetHttpHandler(IndexUrl, body))
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        using HttpClient downloadClient = new(new FakeHttpHandler());
+        using PluginStore store = CreateStore(NewRoot(), key, catalogClient, downloadClient, new FakeLauncher());
+        using CancellationTokenSource cancellation = new();
+        Task<Result<PluginStoreSnapshot>> pending = store.RefreshAsync(true, cancellation.Token);
+        try
+        {
+            await body.Blocked.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await cancellation.CancelAsync();
+            (await pending.WaitAsync(TimeSpan.FromSeconds(5))).ErrorCode.Should().Be("cancelled");
+        }
+        finally
+        {
+            body.Release.TrySetResult();
+            await pending;
+        }
+    }
+
+    [Fact]
+    public async Task Package_body_timeout_fails_and_removes_its_staging()
+    {
+        using SigningKey key = new();
+        byte[] package = Package("0.1.0");
+        FakeHttpHandler catalog = new();
+        SetRelease(catalog, key, "0.1.0", package);
+        using HttpClient catalogClient = new(catalog);
+        using GatedAssetStream body = new(package);
+        using HttpClient downloadClient = new(new GatedAssetHttpHandler(ArtifactUrl, body))
+        {
+            Timeout = TimeSpan.FromSeconds(1)
+        };
+        await using DownloadTaskService downloads = new();
+        string root = NewRoot();
+        FakeLauncher launcher = new();
+        using PluginStore store = CreateStore(root, key, catalogClient, downloadClient, launcher,
+            downloads: downloads);
+        (await store.RefreshAsync(true)).IsSuccess.Should().BeTrue();
+        Task<Result<PluginDefinition>> pending = store.InstallAsync(PluginId);
+        try
+        {
+            await body.Blocked.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Result<PluginDefinition> result = await pending.WaitAsync(TimeSpan.FromSeconds(5));
+            result.ErrorCode.Should().Be("unavailable");
+            result.ErrorMessage.Should().Contain("timed out");
+            downloads.List().Single().State.Should().Be(DownloadTaskService.FailedState);
+            downloads.List().Single().Files.Single().State.Should().Be("failed");
+            launcher.Starts.Should().Be(0);
+            PluginRegistry.Load(PluginRegistry.RegistryPath(root)).Entries.Should().BeEmpty();
+            Directory.GetDirectories(Path.Combine(root, "plugins", ".staging")).Should().BeEmpty();
+        }
+        finally
+        {
+            body.Release.TrySetResult();
+            await pending;
+        }
+    }
+
+    [Fact]
     public async Task Registered_install_streams_signed_bytes_and_awaits_the_real_installation()
     {
         using SigningKey key = new();

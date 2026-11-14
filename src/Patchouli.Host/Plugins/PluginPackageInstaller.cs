@@ -88,10 +88,14 @@ internal static class PluginPackageInstaller
         }
 
         ReportFile(current);
+        // HttpClient.Timeout alone does not cover a streamed response body.
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(client.Timeout);
+        CancellationToken requestToken = deadline.Token;
         try
         {
             using HttpResponseMessage response = await client.GetAsync(url,
-                HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                HttpCompletionOption.ResponseHeadersRead, requestToken);
             if (!response.IsSuccessStatusCode)
             {
                 return Result.Failure("unavailable",
@@ -106,7 +110,7 @@ internal static class PluginPackageInstaller
                 return failure;
             }
 
-            await using Stream source = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using Stream source = await response.Content.ReadAsStreamAsync(requestToken);
             await using FileStream destination = new(archivePath, FileMode.CreateNew, FileAccess.Write,
                 FileShare.None, 81920, true);
             using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -114,7 +118,7 @@ internal static class PluginPackageInstaller
             long total = 0;
             while (true)
             {
-                int read = await source.ReadAsync(buffer, cancellationToken);
+                int read = await source.ReadAsync(buffer, requestToken);
                 if (read == 0)
                 {
                     break;
@@ -130,7 +134,7 @@ internal static class PluginPackageInstaller
                 }
 
                 hash.AppendData(buffer, 0, read);
-                await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                await destination.WriteAsync(buffer.AsMemory(0, read), requestToken);
                 ReportFile(new DownloadFileProgress(relative, "running", total, size));
             }
 
@@ -154,13 +158,19 @@ internal static class PluginPackageInstaller
                 return failure;
             }
 
-            await destination.FlushAsync(cancellationToken);
+            await destination.FlushAsync(requestToken);
             rich?.ReportFile(current with { State = "succeeded" });
             return Result.Success();
         }
         catch (HttpRequestException exception)
         {
             Result failure = Result.Failure("unavailable", $"The plugin download failed: {exception.Message}");
+            rich?.ReportFile(current with { State = "failed", ErrorMessage = failure.ErrorMessage });
+            return failure;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            Result failure = Result.Failure("unavailable", "The plugin download timed out.");
             rich?.ReportFile(current with { State = "failed", ErrorMessage = failure.ErrorMessage });
             return failure;
         }

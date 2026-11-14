@@ -75,6 +75,36 @@ public sealed class UpdateDownloaderTests : IDisposable
     }
 
     [Fact]
+    public async Task Installer_body_timeout_fails_and_deletes_partial_file()
+    {
+        HashSet<string> before = TempUpdateFiles();
+        using GatedAssetStream body = new(_payload);
+        using HttpClient client = new(new GatedAssetHttpHandler(Asset().DownloadUrl, body))
+        {
+            Timeout = TimeSpan.FromSeconds(1)
+        };
+        UpdateDownloader downloader = new(client);
+        Task<Result<VerifiedDownload>> pending = downloader.DownloadAsync(Asset());
+        try
+        {
+            await body.Blocked.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Result<VerifiedDownload> result = await pending.WaitAsync(TimeSpan.FromSeconds(5));
+            result.ErrorCode.Should().Be(AppErrorCodes.NetworkError);
+            result.ErrorMessage.Should().Contain("超时");
+            TempUpdateFiles().Should().BeEquivalentTo(before);
+        }
+        finally
+        {
+            body.Release.TrySetResult();
+            Result<VerifiedDownload> completed = await pending;
+            if (completed.IsSuccess)
+            {
+                _deliveredFiles.Add(completed.Value.FilePath);
+            }
+        }
+    }
+
+    [Fact]
     public async Task Matching_sha256_sidecar_delivers_the_file()
     {
         string expected = Convert.ToHexString(SHA256.HashData(_payload));
