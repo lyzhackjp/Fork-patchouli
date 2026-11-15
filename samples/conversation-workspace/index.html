@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Patchouli · 对话工作台样本</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="masthead"><div class="brand"><span class="mark">p</span>Patchouli<span class="edition">对话工作台</span></div><button id="inspect" class="mode" title="查看样本范围与接口记录">样本模式 · 01</button></header>
+  <main class="shell">
+    <div class="statusbar" aria-label="当前工作上下文">
+      <div><small>状态</small><strong id="status">准备开始</strong></div>
+      <div class="object"><small>对象</small><strong id="object">尚未选择文献</strong></div>
+      <div class="focus-area"><small>注意力</small><button id="focus" class="focus-value" aria-expanded="false">开始工作</button><div id="focus-menu" class="focus-menu" hidden><button id="lock">锁定当前注意力</button><button data-prompt="查看原文">阅读原文</button><button data-prompt="开始翻译">翻译与核对</button></div></div>
+    </div>
+    <div class="workspace">
+      <section class="conversation" aria-label="对话区">
+        <div class="section-head"><span>对话</span><small>样本指令</small></div>
+        <div id="messages" class="messages" role="log" aria-live="polite"></div>
+        <div class="input-area">
+          <div id="tags" class="tags" aria-label="最近注意到的工作内容"></div>
+          <form id="form" class="composer">
+            <div class="input-stack"><div id="ghost" class="ghost" aria-hidden="true"></div><textarea id="input" rows="3" aria-label="输入工作指令" placeholder="说说你想做什么…"></textarea></div>
+            <button type="submit" id="send" class="send" aria-label="发送指令">↑</button>
+          </form>
+          <div class="input-foot"><span id="input-hint">Tab 接受建议 · Enter 发送</span><span>合成材料</span></div>
+        </div>
+      </section>
+      <section class="work" aria-label="工作区">
+        <div class="section-head"><span id="work-title">工作区</span><small id="page-label">从一个任务开始</small></div>
+        <div id="welcome" class="welcome" tabindex="0" data-attention="import">
+          <div class="welcome-inner"><div class="paper-mark">文</div><h1>把文献放进来，<br>从阅读开始。</h1><p>导入 · 原文与译文 · 人工核对</p><button class="primary reveal" data-prompt="导入示例文献">导入示例文献 <span>↖</span></button><small class="welcome-note">移到这里，或直接在左侧开始对话</small></div>
+        </div>
+        <div id="reading" class="reading" hidden>
+          <section id="original-pane" class="pane original" tabindex="0" data-attention="source" aria-label="原文区域">
+            <div class="pane-head"><span>原文 · 日文</span><button class="reveal" data-prompt="查看原文">阅读</button></div>
+            <article class="paper"><small>演示排印 / 非真实史料</small><h2>教育与社会</h2><p id="original-text"></p><div class="page-number">— 1 —</div></article>
+          </section>
+          <section id="translation-pane" class="pane translation" tabindex="0" data-attention="translate" aria-label="译文区域">
+            <div class="pane-head"><span id="translation-label">译文 · 中文</span><button id="translation-action" class="reveal" data-prompt="开始翻译">翻译</button></div>
+            <div id="translation-empty" class="empty-translation"><span>让文字变得可读</span><p>原文留在身旁，译文在这里展开。</p></div>
+            <textarea id="translation-editor" aria-label="人工核对译文" spellcheck="false" hidden></textarea>
+            <div id="edit-state" class="edit-state"></div>
+          </section>
+        </div>
+        <footer class="work-foot"><span id="provenance">演示响应 · 尚未连接本地 Patchouli</span><span id="revision"></span></footer>
+      </section>
+    </div>
+  </main>
+  <dialog id="inspector"><div class="dialog-head"><h2>接口与样本范围</h2><button id="close-inspector" aria-label="关闭">×</button></div><p>此样本使用 Patchouli 既有 MCP 请求格式，响应来自本地合成样例。没有访问真实文献、模型或 Agent。</p><p>可演练：导入示例文献 → 开始翻译 → 修改右侧译文 → 保存修改。也可说“把「独立思考」改为「自主思考」”。</p><details><summary>下一次调用的错误演练</summary><div class="faults"><button data-fault="conflict">保存版本冲突</button><button data-fault="unavailable">连接不可用</button><button data-fault="truncated">页面内容不完整</button></div><p>设置后返回工作区；冲突在下一次保存触发，不完整在下一次页面读取触发。</p></details><h3>请求 / 回执</h3><pre id="trace">尚无请求</pre></dialog>
+  <script src="core.js"></script>
+  <script src="fixture.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>
